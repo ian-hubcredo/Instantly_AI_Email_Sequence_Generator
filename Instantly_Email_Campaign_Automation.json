@@ -1,0 +1,383 @@
+{
+  "name": "Instantly Email Campaign Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Filter approved prospects for email outreach\nconst items = $input.all();\n\nconsole.log('📧 Starting Instantly Campaign Automation...');\nconsole.log('Total items received:', items.length);\n\n// Process ALL leads and add approval status\nconst processed = items.map(item => {\n  const data = item.json;\n  \n  // Check approval status\n  const companyApproved = data['Company Approved'] === 'Yes' || data.company_approved === true;\n  const personaApproved = data['Persona Approved'] === 'Yes' || data.persona_approved === true;\n  \n  // Check for valid email\n  const hasEmail = data['Email Id'] || data.email || data.Email;\n  \n  // Determine unapproval reasons\n  let reasons = [];\n  if (!companyApproved) reasons.push('Company not approved');\n  if (!personaApproved) reasons.push('Persona not approved');\n  if (!hasEmail) reasons.push('No valid email address');\n  \n  const isApproved = companyApproved && personaApproved && hasEmail;\n  \n  return {\n    ...item,\n    json: {\n      ...data,\n      is_approved: isApproved,\n      approval_status: isApproved ? 'Approved' : reasons.join(', '),\n      unapproval_reasons: reasons\n    }\n  };\n});\n\n// Filter for approved leads\nconst approved = processed.filter(item => item.json.is_approved);\n\nconsole.log('✅ Approved prospects with emails:', approved.length);\nconsole.log('❌ Rejected prospects:', processed.length - approved.length);\n\nif (approved.length === 0) {\n  console.log('⚠️ No approved prospects found. Stopping workflow.');\n  return [];\n}\n\n// Map to clean prospect data\nreturn approved.map(item => {\n  const data = item.json;\n  return {\n    json: {\n      // Core fields\n      email: data['Email Id'] || data.email || data.Email,\n      first_name: data.person_first_name || data['Name']?.split(' ')[0] || data.first_name || '',\n      last_name: data['Name']?.split(' ').slice(1).join(' ') || data.person_last_name || data.last_name || '',\n      \n      // Company information\n      company_name: data['Company Name'] || data.company_name || '',\n      company_domain: data['Company Domain'] || data.company_domain || data.website || '',\n      \n      // Role and industry\n      designation: data['Designation'] || data.person_title || data.title || '',\n      industry: data['Company Industry'] || data.company_industry || '',\n      \n      // Context for personalization\n      tech_stack: data['Company Technologies'] || data.company_technologies || data.technologies || '',\n      company_keywords: data['Company Keywords'] || data.company_keywords || data.keywords || '',\n      \n      // NEW: Add approval tracking\n      is_approved: data.is_approved,\n      approval_status: data.approval_status\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        3808
+      ],
+      "id": "f1bc4cc8-0286-4076-915c-adeb978a489f",
+      "name": "Filter Approved Prospects",
+      "notes": "Filters prospects who passed both company and persona validation and have valid emails"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.instantly.ai/api/v2/leads",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "instantlyApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n     \"campaign_id\": \"e699a44b-21a7-495b-ac77-ff10fa3f7da9\",\n     \"email\": \"{{ $json.email }}\",\n     \"first_name\": \"{{ $json.first_name }}\",\n     \"last_name\": \"{{ $json.last_name }}\",\n     \"company_name\": \"{{ $json.company_name }}\",\n     \"website\": \"{{ $json.company_domain }}\",\n     \"personalization\": {\n       \"designation\": \"{{ $json.designation }}\",\n       \"industry\": \"{{ $json.industry }}\",\n       \"tech_stack\": \"{{ $json.tech_stack }}\",\n       \"company_keywords\": \"{{ $json.company_keywords }}\"\n     },\n     \"skip_if_in_workspace\": true,\n     \"skip_if_in_campaign\": true\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2160,
+        3808
+      ],
+      "id": "f524b883-8b3c-495e-8ee9-267d1bc41f44",
+      "name": "Add Lead to Campaign",
+      "credentials": {
+        "instantlyApi": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      },
+      "notes": "FIXED: Uses 'custom_variables' per API V2 docs. Includes skip flags to prevent duplicates."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Show rejected leads with reasons\nconst items = $input.all();\n\nconsole.log('🔍 Checking for rejected leads...');\n\n// Filter for rejected leads only\nconst rejected = items.filter(item => {\n  const data = item.json;\n  const companyApproved = data['Company Approved'] === 'Yes' || data.company_approved === true;\n  const personaApproved = data['Persona Approved'] === 'Yes' || data.persona_approved === true;\n  const hasEmail = data['Email Id'] || data.email || data.Email;\n  \n  return !(companyApproved && personaApproved && hasEmail);\n});\n\nconsole.log('❌ Total rejected leads:', rejected.length);\n\nif (rejected.length === 0) {\n  console.log('✅ All leads were approved!');\n  return [];\n}\n\n// Format rejected leads with reasons\nreturn rejected.map(item => {\n  const data = item.json;\n  \n  // Determine reasons\n  let reasons = [];\n  if (data['Company Approved'] !== 'Yes' && !data.company_approved) {\n    reasons.push('Company not approved');\n  }\n  if (data['Persona Approved'] !== 'Yes' && !data.persona_approved) {\n    reasons.push('Persona not approved');\n  }\n  if (!data['Email Id'] && !data.email && !data.Email) {\n    reasons.push('No valid email address');\n  }\n  \n  return {\n    json: {\n      lead_name: data['Name'] || 'Unknown',\n      email: data['Email Id'] || data.email || data.Email || 'NO EMAIL',\n      company: data['Company Name'] || 'Unknown',\n      designation: data['Designation'] || data.person_title || 'Unknown',\n      \n      // Approval details\n      company_approved: data['Company Approved'] || data.company_approved || 'No',\n      persona_approved: data['Persona Approved'] || data.persona_approved || 'No',\n      \n      // Rejection info\n      rejection_reasons: reasons.join(' | '),\n      total_reasons: reasons.length,\n      status: '❌ REJECTED'\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        3568
+      ],
+      "id": "15ea987d-08e1-4838-9159-701933c06013",
+      "name": "Show Rejected Leads"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Sales Automation AI Review"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2672,
+        3696
+      ],
+      "id": "82c8e51b-31da-4296-8599-93cce779f126",
+      "name": "When Executed by Sales Automation AI Review Workflow"
+    },
+    {
+      "parameters": {
+        "content": "Adding lead to the already existing Campaign",
+        "height": 544,
+        "width": 800,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2736,
+        3504
+      ],
+      "typeVersion": 1,
+      "id": "004f915f-fb5c-4773-80fb-ced76786f151",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 2000,
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -1152,
+        3856
+      ],
+      "id": "4570d910-87ca-4e69-a758-31f13b83f07f",
+      "name": "OpenAI GPT-4",
+      "credentials": {
+        "openAiApi": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      },
+      "notes": "Configure your OpenAI API key in credentials. Uses JSON mode for structured output."
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1648,
+        3664
+      ],
+      "id": "b171a12a-4322-461e-9003-f4ac04851520",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "content": "Create personalized Email Template ",
+        "height": 560,
+        "width": 1328
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1728,
+        3488
+      ],
+      "typeVersion": 1,
+      "id": "fe8ae153-7086-432a-9cbf-a43b8b71a18f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1j2H2tZM_fI-lWgOleBm971HDtnsXxgkQUWoZqmNCYnI",
+          "mode": "list",
+          "cachedResultName": "Sales Automation AI Review",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<REDACTED_SHEET_ID>/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 893257743,
+          "mode": "list",
+          "cachedResultName": "Rejected Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<REDACTED_SHEET_ID>/edit#gid=893257743"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2160,
+        3568
+      ],
+      "id": "58c50d5a-341b-4714-8acf-8292fb612d06",
+      "name": "Log Rejected Leads to Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n     json: {\n       first_name: \"{{firstName}}\",\n       last_name: \"{{lastName}}\",\n       company_name: \"{{companyName}}\",\n       company_domain: \"{{website}}\",\n       designation: \"{{designation}}\",\n       industry: \"{{industry}}\",\n       tech_stack: \"{{tech_stack}}\",\n       company_keywords: \"{{company_keywords}}\"\n     }\n   }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1424,
+        3664
+      ],
+      "id": "c03789ee-b428-4a0c-aa12-067133bb267a",
+      "name": "Prepare Campaign Context"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=#Context:\nYou are an SDR for Postman. The company website is https://www.postman.com.\nPostman helps teams design, test, debug, and manage APIs in one workspace.\nIt makes API development faster, reduces errors, improves collaboration, and keeps documentation updated across teams.\nYou write cold emails in a simple and clear way and explain value without jargon.\n\n#Action:\nWrite a 3-email cold outreach sequence using the PAS structure internally (Problem-Agitation-Solution), but do not show or mention any frameworks in the output.\n\nApply PAS internally like this:\n- Problem: identify a real API or integration challenge for technical teams\n- Agitation: show the friction or slowdown that happens when the problem is not solved\n- Solution: bring Postman in as the natural fix through better API testing, collaboration, and reliability\n\nKeep PAS internal only. Use active voice and simple English. Do not add pleasantries.\nSubject line under 60 characters.\nUse relevant facts, figures and data to create better impact.\n\nEmail Formatting:\n- Start each email with: Hi FIRSTNAME, or Hello FIRSTNAME,\n- Use COMPANYNAME when mentioning their company\n- End with: Best, or Regards, or Sincerely,\n- Add signature: Best, Ian\n- Write complete, detailed email bodies with multiple paragraphs\n- Make emails substantial - Email 1: 80+ words, Email 2: 100+ words, Email 3: 110+ words\n- Use bullet points with asterisks (*) when listing benefits\n\nEmail Sequence Guidelines:\nEmail 1 (Contextual Opener - 80+ words):\n- Reference common API challenges for technical teams\n- Mention relevant challenge based on API-focused roles\n- Ask ONE open-ended question\n- NO links, NO product pitch, NO meeting ask\n\nEmail 2 (Soft Introduction - 100+ words):\n- Light follow-up on email 1's topic\n- Contextually introduce Postman\n- Explain shared problem teams face\n- End with curiosity-driven question\n\nEmail 3 (Value Example - 110+ words):\n- Share ONE brief real-world outcome with specific numbers like 40% faster or 60% fewer errors\n- Focus on results, not features\n- Calm, helpful tone\n- NO hard CTA, NO meeting ask\n- Leave door open without pressure\n\n#Result:\nWrite the final 3-email sequence.\nFollow CARE internally without showing labels.\nUse PAS quietly to build the message flow.\nMake it short, clear, and relevant to API-driven teams.\nNo jargon and no long explanations.\n\n#Example:\nYour final output should look like clean cold emails that begin with Hi FIRSTNAME or Hello FIRSTNAME, then move into personalization, the challenge, the value, a small scenario, and a clear next step.\nDo not write labels like Context, Action, Result, or Example in the emails.\n\nOutput format:\n\nEMAIL_1_SUBJECT: [subject line here]\nEMAIL_1_BODY: [full email body starting with greeting, multiple paragraphs, ending with sign-off and signature]\n\nEMAIL_2_SUBJECT: [subject line here]\nEMAIL_2_BODY: [full email body starting with greeting, multiple paragraphs, ending with sign-off and signature]\n\nEMAIL_3_SUBJECT: [subject line here]\nEMAIL_3_BODY: [full email body starting with greeting, multiple paragraphs, ending with sign-off and signature]\n\nNow write all 3 cold emails.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -1216,
+        3664
+      ],
+      "id": "aecd5649-cef4-425d-b7c5-d1b73e547ddd",
+      "name": "AI: Generate 3-Email Sequence",
+      "notes": "Uses LLM to generate 3 personalized emails following the sequence structure"
+    },
+    {
+      "parameters": {
+        "jsCode": "let aiResponse = '';\n\nif (Array.isArray($input.all()) && $input.all()[0]?.json) {\n  const firstItem = $input.all()[0].json;\n  \n  if (Array.isArray(firstItem) && firstItem[0]?.text) {\n    aiResponse = firstItem[0].text;\n  } else if (firstItem.text) {\n    aiResponse = firstItem.text;\n  }\n}\n\nif (!aiResponse) {\n  throw new Error('No AI response found');\n}\n\nconst email1Match = aiResponse.match(/EMAIL_1_SUBJECT:\\s*(.+?)\\s*EMAIL_1_BODY:\\s*(.+?)(?=EMAIL_2_SUBJECT|$)/s);\nconst email2Match = aiResponse.match(/EMAIL_2_SUBJECT:\\s*(.+?)\\s*EMAIL_2_BODY:\\s*(.+?)(?=EMAIL_3_SUBJECT|$)/s);\nconst email3Match = aiResponse.match(/EMAIL_3_SUBJECT:\\s*(.+?)\\s*EMAIL_3_BODY:\\s*(.+?)$/s);\n\nconst email1Subject = email1Match?.[1]?.trim() || '';\nlet email1Body = email1Match?.[2]?.trim().replace(/---/g, '').trim() || '';\n\nconst email2Subject = email2Match?.[1]?.trim() || '';\nlet email2Body = email2Match?.[2]?.trim().replace(/---/g, '').trim() || '';\n\nconst email3Subject = email3Match?.[1]?.trim() || '';\nlet email3Body = email3Match?.[2]?.trim().replace(/---/g, '').trim() || '';\n\nemail1Body = email1Body.replace(/(Hi FIRSTNAME,|Hello FIRSTNAME,)/g, '{{RANDOM | Hi {{firstName}}, | Hello {{firstName}},}}');\nemail2Body = email2Body.replace(/(Hi FIRSTNAME,|Hello FIRSTNAME,)/g, '{{RANDOM | Hi {{firstName}}, | Hello {{firstName}},}}');\nemail3Body = email3Body.replace(/(Hi FIRSTNAME,|Hello FIRSTNAME,)/g, '{{RANDOM | Hi {{firstName}}, | Hello {{firstName}},}}');\n\nemail1Body = email1Body.replace(/COMPANYNAME/g, '{{companyName}}');\nemail2Body = email2Body.replace(/COMPANYNAME/g, '{{companyName}}');\nemail3Body = email3Body.replace(/COMPANYNAME/g, '{{companyName}}');\n\nemail1Body = email1Body.replace(/Best,/g, '{{RANDOM | Best, | Regards, | Sincerely, }}');\nemail2Body = email2Body.replace(/Regards,/g, '{{RANDOM | Best, | Regards, | Sincerely, }}');\nemail3Body = email3Body.replace(/Sincerely,/g, '{{RANDOM | Best, | Regards, | Sincerely, }}');\n\n// Wrap paragraphs in <p> tags\nfunction wrapParagraphs(text) {\n  const paragraphs = text.split('\\n\\n');\n  return paragraphs.map(p => `<p>${p.replace(/\\n/g, '<br>')}</p>`).join('');\n}\n\nemail1Body = wrapParagraphs(email1Body);\nemail2Body = wrapParagraphs(email2Body);\nemail3Body = wrapParagraphs(email3Body);\n\nreturn { \n  json: {\n    email_1_subject: email1Subject,\n    email_1_body: email1Body,\n    email_2_subject: email2Subject,\n    email_2_body: email2Body,\n    email_3_subject: email3Subject,\n    email_3_body: email3Body\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        3664
+      ],
+      "id": "aa21e4a7-9a70-4882-8f6d-8fd24ec2dc1e",
+      "name": "Parse & Format Email Output"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.instantly.ai/api/v2/campaigns/9f734c34-3082-48a9-bbc4-f0ccd3f593cb",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "instantlyApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { sequences: [{ steps: [{ type: 'email', delay: 0, variants: [{ subject: $json.email_1_subject, body: $json.email_1_body }] }, { type: 'email', delay: 3, variants: [{ subject: $json.email_2_subject, body: $json.email_2_body }] }, { type: 'email', delay: 3, variants: [{ subject: $json.email_3_subject, body: $json.email_3_body }] }] }], schedule: { days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], start_hour: '09:00', end_hour: '17:00', timezone: 'America/New_York', min_time_btw_emails: 60, max_new_leads_per_day: 50 } } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -624,
+        3664
+      ],
+      "id": "0c566d9d-ff79-4ffc-8021-1adf1eb1dbb0",
+      "name": "Create Campaign in Instantly",
+      "credentials": {
+        "instantlyApi": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      },
+      "notes": "FIXED: Uses correct API V2 structure with proper sequences.steps format. Campaign created in DRAFT (status: 0)."
+    }
+  ],
+  "connections": {
+    "Filter Approved Prospects": {
+      "main": [
+        [
+          {
+            "node": "Add Lead to Campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show Rejected Leads": {
+      "main": [
+        [
+          {
+            "node": "Log Rejected Leads to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Sales Automation AI Review Workflow": {
+      "main": [
+        [
+          {
+            "node": "Show Rejected Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Approved Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI: Generate 3-Email Sequence",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Prepare Campaign Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Campaign Context": {
+      "main": [
+        [
+          {
+            "node": "AI: Generate 3-Email Sequence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Generate 3-Email Sequence": {
+      "main": [
+        [
+          {
+            "node": "Parse & Format Email Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Format Email Output": {
+      "main": [
+        [
+          {
+            "node": "Create Campaign in Instantly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejected Leads to Sheet": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
